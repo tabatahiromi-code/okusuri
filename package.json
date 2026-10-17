@@ -5,6 +5,12 @@
   "type": "module",
   "scripts": {
     "test": "node tests/app.test.js",
-    "check": "node --check src/worker.js && node --check public/app.js && node --check public/parser.js"
+    "check": "node --check src/worker.js && node --check public/app.js && node --check public/parser.js",
+    "build": "node scripts/build.mjs",
+    "db:generate": "drizzle-kit generate"
+  },
+  "devDependencies": {
+    "drizzle-kit": "0.31.10",
+    "drizzle-orm": "0.45.2"
   }
 }
