@@ -1,0 +1,14 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { parseSticker } from '../public/parser.js';
+import worker, { validateRecord } from '../src/worker.js';
+const record={date:'2026-10-17',clinic:'テスト医院',pharmacy:'テスト薬局',medicines:[{name:'テスト錠 5mg',dosage:'1回1錠 1日2回 食後'}],originalText:'',note:''};
+test('日本語シールから処方日・薬名・用法を候補にする',()=>{const result=parseSticker('令和8年10月17日\nテスト医院\nテスト薬局\nテスト錠5mg\n1日2回 朝夕食後');assert.equal(result.date,'2026-10-17');assert.equal(result.medicines[0].dosage,'1日2回朝夕食後');assert.equal(result.clinic,'テスト医院');});
+test('数字・英字の全角に対応する',()=>assert.equal(parseSticker('２０２６年１０月１７日\nテスト錠５ｍｇ').date,'2026-10-17'));
+test('存在しない日付を採用しない',()=>assert.equal(parseSticker('2026年2月30日').date,''));
+test('保存には有効な日付と薬名が必要',()=>{assert.ok(validateRecord(record));assert.equal(validateRecord({...record,date:'2026-02-30'}),null);assert.equal(validateRecord({...record,medicines:[]}),null);assert.equal(validateRecord({...record,medicines:[{name:' ',dosage:''}]}),null);});
+test('匿名のAPIアクセスを拒否する',async()=>{const res=await worker.fetch(new Request('https://example.com/api/records'),{});assert.equal(res.status,401);});
+test('異なるoriginからの書込みを拒否する',async()=>{const res=await worker.fetch(new Request('https://example.com/api/records',{method:'POST',headers:{'oai-authenticated-user-id':'user1','origin':'https://another.com'}}),{DB:{}});assert.equal(res.status,403);});
+test('一覧を認証ユーザーで絞り込む',async()=>{let params;const DB={prepare(sql){assert.match(sql,/WHERE user_id = \?/);return{bind(...values){params=values;return{all:async()=>({results:[]})}}}}};const res=await worker.fetch(new Request('https://example.com/api/records',{headers:{'oai-authenticated-user-id':'user1'}}),{DB});assert.equal(res.status,200);assert.deepEqual(params,['user1']);});
+test('削除はレコードIDと所有者の両方で制限する',async()=>{let params;const DB={prepare(sql){assert.match(sql,/id = \? AND user_id = \?/);return{bind(...values){params=values;return{run:async()=>({meta:{changes:0}})}}}}};const res=await worker.fetch(new Request('https://example.com/api/records/other-record',{method:'DELETE',headers:{'oai-authenticated-user-id':'user1','origin':'https://example.com'}}),{DB});assert.equal(res.status,404);assert.deepEqual(params,['other-record','user1']);});
+test('日本語OCRに混ざる空白と丸数字を正規化する',()=>{const result=parseSticker('⑳②⑥ 年 ⑩ 月 ⑰ 日\nテ ス ト 薬 局\nテ ス ト 錠 ⑤mg\n① 回 ① 錠 ① 日 ② 回 朝 夕 食 後');assert.equal(result.date,'2026-10-17');assert.equal(result.pharmacy,'テスト薬局');assert.equal(result.medicines[0].name,'テスト錠5mg');assert.equal(result.medicines[0].dosage,'1回1錠1日2回朝夕食後');});

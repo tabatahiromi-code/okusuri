@@ -1,0 +1,10 @@
+{
+  "name": "okusuri",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/app.test.js",
+    "check": "node --check src/worker.js && node --check public/app.js && node --check public/parser.js"
+  }
+}
