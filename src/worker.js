@@ -1,12 +1,6 @@
 const response = (data, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
-export function validateRecord(data) {
-  if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data.date || '') || Number.isNaN(Date.parse(data.date)) || new Date(data.date).toISOString().slice(0,10) !== data.date) return null;
-  const fields = ['clinic', 'pharmacy', 'originalText', 'note'];
-  if (fields.some(k => typeof data[k] !== 'string' || data[k].length > (k === 'originalText' ? 30000 : 3000))) return null;
-  if (!Array.isArray(data.medicines) || !data.medicines.length || data.medicines.length > 50) return null;
-  if (data.medicines.some(m => !m || typeof m.name !== 'string' || !m.name.trim() || m.name.length > 500 || typeof m.dosage !== 'string' || m.dosage.length > 1000)) return null;
-  return { ...data, medicines: data.medicines.map(m => ({ name: m.name.trim(), dosage: m.dosage.trim() })) };
-}
+import { validateRecord, parseImport } from '../public/record-format.js';
+export { validateRecord };
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -15,6 +9,25 @@ export default {
     if (!user) return response({ error: 'ChatGPTにサインインしてください。' }, 401);
     if (!env.DB) return response({ error: '保存先がまだ設定されていません。公開設定の完了後に利用できます。' }, 503);
     if (!['GET', 'HEAD'].includes(request.method) && request.headers.get('origin') !== url.origin) return response({ error: '許可されていないリクエストです。' }, 403);
+    if(url.pathname === '/api/records/import') {
+      if(request.method!=='POST') return response({error:'対応していない操作です。'},405);
+      if(!request.headers.get('content-type')?.includes('application/json')) return response({error:'JSON形式で送信してください。'},415);
+      const body=await request.text();
+      if(body.length>2000000) return response({error:'2MB以下のJSONファイルを選択してください。'},413);
+      let input;try{input=JSON.parse(body);}catch{return response({error:'JSONファイルを読み取れませんでした。'},400);}
+      let items;try{items=parseImport(input);}catch(error){return response({error:error.message},400);}
+      try{
+        const now=new Date().toISOString();
+        // Atomic batch: validate the entire file before writing. The predicate also handles retries and concurrent imports.
+        const statements=items.map(r=>{
+          const values=[user,r.date,r.clinic,r.pharmacy,JSON.stringify(r.medicines),r.originalText,r.note];
+          return env.DB.prepare('INSERT INTO records (id,user_id,prescription_date,clinic,pharmacy,medicines,original_text,note,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM records WHERE user_id=? AND prescription_date=? AND clinic=? AND pharmacy=? AND medicines=? AND original_text=? AND note=?)').bind(crypto.randomUUID(),...values,now,now,...values);
+        });
+        const results=await env.DB.batch(statements);
+        const imported=results.reduce((sum,r)=>sum+(r.meta.changes||0),0);
+        return response({imported,skipped:items.length-imported});
+      }catch{return response({error:'取り込みに失敗しました。記録を再読み込みしてから、同じファイルで再試行できます。'},500);}
+    }
     const match = url.pathname.match(/^\/api\/records(?:\/([\w-]+))?$/);
     if (!match) return response({ error: '見つかりません。' }, 404);
     const id = match[1];

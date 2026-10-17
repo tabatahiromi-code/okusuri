@@ -1,3 +1,4 @@
+import { setupJsonImport } from './import.js';
 import { parseSticker } from './parser.js';
 import { createImageCropper } from './crop.js';
 import { OCR_MODEL, normalizeOcrText, prepareImage } from './ocr-utils.js';
@@ -62,4 +63,6 @@ for(const selector of ['#image-file','#camera-file']) $(selector).onchange=e=>{c
 $('#close-editor').onclick=$('#cancel-edit').onclick=closeEditor; editor.addEventListener('cancel',e=>{e.preventDefault();closeEditor();}); camera.addEventListener('cancel',e=>{e.preventDefault();closeCamera();});
 $('#add-medicine').onclick=()=>{if($('#medicine-fields').children.length<50)addMedicine();else toast('1件に保存できるお薬は50種類までです。');}; $('#parse-text').onclick=()=>{if($('#medicine-fields input').value.trim()&&!confirm('現在の入力を文章からの候補で置き換えますか？'))return;applyCandidates(form.elements.originalText.value,true);};
 form.onsubmit=save; $('#search').oninput=()=>{if(loaded)render();}; $('#sort').onchange=()=>{if(loaded)render();}; $('#export').onclick=exportRecords;
-editor.addEventListener('close',()=>{++ocrGeneration; if(worker){worker.terminate();worker=null;}clearPhoto();}); camera.addEventListener('close',stopCamera); window.addEventListener('pagehide',stopCamera); load();
+editor.addEventListener('close',()=>{++ocrGeneration; if(worker){worker.terminate();worker=null;}clearPhoto();}); camera.addEventListener('close',stopCamera); window.addEventListener('pagehide',stopCamera);
+setupJsonImport({api,load,getRecords:()=>records,toast,element,dateLabel});
+load();
