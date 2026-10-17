@@ -7,6 +7,8 @@ await mkdir('dist/.openai', {recursive:true});
 await cp('public','dist/client',{recursive:true});
 await writeFile('dist/server/index.js',(await readFile('src/worker.js','utf8')).replace("'../public/record-format.js'","'./record-format.js'"));
 await cp('public/record-format.js','dist/server/record-format.js');
+await cp('src/records-store.js','dist/server/records-store.js');
+await writeFile('dist/server/mcp.js',(await readFile('src/mcp.js','utf8')).replace("'../public/record-format.js'","'./record-format.js'"));
 await cp('.openai/hosting.json','dist/.openai/hosting.json');
 await cp('drizzle','dist/.openai/drizzle',{recursive:true});
 await writeFile('dist/server/package.json', JSON.stringify({type:'module'}));

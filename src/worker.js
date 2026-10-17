@@ -1,9 +1,12 @@
+import { handleMcp } from './mcp.js';
+import { importRecords } from './records-store.js';
 const response = (data, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 import { validateRecord, parseImport } from '../public/record-format.js';
 export { validateRecord };
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/mcp' || url.pathname === '/mcp/') return handleMcp(request,env);
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
     const user = request.headers.get('oai-authenticated-user-id');
     if (!user) return response({ error: 'ChatGPTにサインインしてください。' }, 401);
@@ -17,15 +20,7 @@ export default {
       let input;try{input=JSON.parse(body);}catch{return response({error:'JSONファイルを読み取れませんでした。'},400);}
       let items;try{items=parseImport(input);}catch(error){return response({error:error.message},400);}
       try{
-        const now=new Date().toISOString();
-        // Atomic batch: validate the entire file before writing. The predicate also handles retries and concurrent imports.
-        const statements=items.map(r=>{
-          const values=[user,r.date,r.clinic,r.pharmacy,JSON.stringify(r.medicines),r.originalText,r.note];
-          return env.DB.prepare('INSERT INTO records (id,user_id,prescription_date,clinic,pharmacy,medicines,original_text,note,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM records WHERE user_id=? AND prescription_date=? AND clinic=? AND pharmacy=? AND medicines=? AND original_text=? AND note=?)').bind(crypto.randomUUID(),...values,now,now,...values);
-        });
-        const results=await env.DB.batch(statements);
-        const imported=results.reduce((sum,r)=>sum+(r.meta.changes||0),0);
-        return response({imported,skipped:items.length-imported});
+        return response(await importRecords(env.DB,user,items));
       }catch{return response({error:'取り込みに失敗しました。記録を再読み込みしてから、同じファイルで再試行できます。'},500);}
     }
     const match = url.pathname.match(/^\/api\/records(?:\/([\w-]+))?$/);
