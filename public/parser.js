@@ -1,6 +1,7 @@
+import { normalizeOcrText } from './ocr-utils.js';
 // OCR結果は候補のみ。自動確定せず、必ずユーザーが原文と確認する。
 export function parseSticker(text) {
-  const normalized = text.normalize('NFKC').replace(/(?<=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\d]) +(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\d])/gu, '');
+  const normalized = normalizeOcrText(text);
   const lines = normalized.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   let date = '';
   const d = normalized.match(/(?:(20\d{2})|令和\s*(元|\d{1,2}))\s*[年/.\-]\s*(\d{1,2})\s*[月/.\-]\s*(\d{1,2})/);

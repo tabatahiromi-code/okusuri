@@ -1,6 +1,9 @@
 import { parseSticker } from './parser.js';
+import { createImageCropper } from './crop.js';
+import { OCR_MODEL, normalizeOcrText, prepareImage } from './ocr-utils.js';
 const $ = s => document.querySelector(s);
 const editor = $('#editor'), form = $('#record-form'), camera = $('#camera-dialog');
+const chooseImage = createImageCropper($('#crop-dialog'), readImage, toast);
 let records = [], editId = null, stream = null, worker = null, ocrGeneration = 0, photoUrl = null, saving = false, loaded = false;
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 const dateLabel = date => date ? date.replaceAll('-', '.') : '—';
@@ -29,7 +32,7 @@ function closeEditor() { if(saving) return; ++ocrGeneration; if(worker) { worker
 function stopCamera() { if(stream) stream.getTracks().forEach(t=>t.stop()); stream=null; $('#camera-video').srcObject=null; }
 function closeCamera() { stopCamera(); camera.close(); }
 async function startCamera() { $('#camera-status').textContent='カメラを起動しています…'; $('#take-photo').disabled=true; camera.showModal(); if(!navigator.mediaDevices?.getUserMedia) { $('#camera-status').textContent='このブラウザでは直接起動できません。「端末のカメラを使う」を選んでください。'; return; } try { const active=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:2560},height:{ideal:1920}},audio:false}); if(!camera.open) { active.getTracks().forEach(t=>t.stop()); return; } stream=active; $('#camera-video').srcObject=active; await $('#camera-video').play(); $('#take-photo').disabled=false; $('#camera-status').textContent='シール全体を大きく写し、影や反射を避けてください。'; } catch { $('#camera-status').textContent='カメラを起動できませんでした。カメラの使用を許可するか、端末のカメラ・画像からの読み取りをお使いください。'; } }
-async function takePhoto() { const v=$('#camera-video'); if(!v.videoWidth) return; const c=document.createElement('canvas'); c.width=v.videoWidth; c.height=v.videoHeight; c.getContext('2d').drawImage(v,0,0); const blob=await new Promise(resolve=>c.toBlob(resolve,'image/jpeg',.95)); closeCamera(); if(blob) readImage(blob); }
+async function takePhoto() { const v=$('#camera-video'); if(!v.videoWidth) return; const c=document.createElement('canvas'); c.width=v.videoWidth; c.height=v.videoHeight; c.getContext('2d').drawImage(v,0,0); const blob=await new Promise(resolve=>c.toBlob(resolve,'image/jpeg',.95)); closeCamera(); if(blob) chooseImage(blob); }
 async function readImage(file) {
   if(!file || (file.type && !file.type.startsWith('image/'))) return toast('画像を選択してください。');
   if(file.size>25*1024*1024) return toast('25MB以下の画像を選択してください。');
@@ -38,12 +41,14 @@ async function readImage(file) {
   let activeWorker;
   try {
     const image = new Image(); image.src=photoUrl; await image.decode();
-    const scale=Math.min(1,3200/Math.max(image.naturalWidth,image.naturalHeight)); const canvas=document.createElement('canvas'); canvas.width=Math.round(image.naturalWidth*scale); canvas.height=Math.round(image.naturalHeight*scale); const ctx=canvas.getContext('2d'); ctx.fillStyle='white'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.drawImage(image,0,0,canvas.width,canvas.height);
-    activeWorker=await Tesseract.createWorker('jpn+eng',1,{workerPath:'/ocr/worker.min.js',corePath:'/ocr/core',langPath:'/ocr',workerBlobURL:false,logger:m=>{if(generation!==ocrGeneration)return; const progress=Math.max(0,Math.min(1,m.progress||0)); $('#ocr-progress').value=progress; $('#ocr-state').textContent=m.status==='recognizing text'?`文字を読み取り中… ${Math.round(progress*100)}%`:'日本語の文字認識を準備しています…';}});
+    const canvas=prepareImage(image);
+    activeWorker=await Tesseract.createWorker(OCR_MODEL.language,1,{workerPath:'/ocr/worker.min.js',corePath:'/ocr/core',langPath:OCR_MODEL.langPath,cachePath:OCR_MODEL.cachePath,workerBlobURL:false,logger:m=>{if(generation!==ocrGeneration)return; const progress=Math.max(0,Math.min(1,m.progress||0)); $('#ocr-progress').value=progress; $('#ocr-state').textContent=m.status==='recognizing text'?`文字を読み取り中… ${Math.round(progress*100)}%`:'日本語の文字認識を準備しています…';}});
     if(generation!==ocrGeneration) return; worker=activeWorker;
-    const {data}=await activeWorker.recognize(canvas); if(generation!==ocrGeneration)return;
-    form.elements.originalText.value=data.text.trim(); applyCandidates(data.text,false); $('#original-details').open=true;
-    $('#ocr-state').textContent=data.text.trim()?'読み取りました。候補には誤りや抜けがあるため、シールと照合して修正してください。':'文字を読み取れませんでした。明るい場所で撮り直すか、手入力してください。';
+    await activeWorker.setParameters({preserve_interword_spaces:'0',user_defined_dpi:'300'});
+    const {data}=await activeWorker.recognize(canvas,{rotateAuto:true}); if(generation!==ocrGeneration)return;
+    const text=normalizeOcrText(data.text);
+    form.elements.originalText.value=text; applyCandidates(text,false); $('#original-details').open=true;
+    $('#ocr-state').textContent=text?(data.confidence<75?'判読しづらい箇所があります。範囲を絞って撮り直すか、原本を見て修正してください。':'読み取りました。薬名・数字には誤りが残る場合があります。必ずシールと照合してください。'):'文字を読み取れませんでした。明るい場所で撮り直すか、手入力してください。';
   } catch { if(generation===ocrGeneration) { $('#ocr-state').textContent='読み取りできませんでした。画像形式や通信状態を確認して撮り直すか、手入力してください。'; $('#original-details').open=true; } }
   finally { if(activeWorker) await activeWorker.terminate().catch(()=>{}); if(worker===activeWorker) worker=null; if(generation===ocrGeneration) { $('#ocr-progress').hidden=true; $('#save').disabled=false; } }
 }
@@ -53,7 +58,7 @@ async function deleteRecord(r) { if(!confirm(`${dateLabel(r.date)}の記録を�
 function exportRecords() { if(!loaded) return toast('記録を取得してからお試しください。'); const blob=new Blob([JSON.stringify({version:1,exportedAt:new Date().toISOString(),records},null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=element('a'); a.href=url; a.download=`okusuri-${today()}.json`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000); }
 $('#add').onclick=$('#nav-add').onclick=()=>openEditor(); $('#scan').onclick=startCamera; $('#upload').onclick=()=>$('#image-file').click(); $('#close-camera').onclick=closeCamera; $('#take-photo').onclick=takePhoto;
 $('#fallback-camera').onclick=()=>{closeCamera();$('#camera-file').click();};
-for(const selector of ['#image-file','#camera-file']) $(selector).onchange=e=>{const file=e.target.files[0];e.target.value='';if(file)readImage(file);};
+for(const selector of ['#image-file','#camera-file']) $(selector).onchange=e=>{const file=e.target.files[0];e.target.value='';if(file)chooseImage(file);};
 $('#close-editor').onclick=$('#cancel-edit').onclick=closeEditor; editor.addEventListener('cancel',e=>{e.preventDefault();closeEditor();}); camera.addEventListener('cancel',e=>{e.preventDefault();closeCamera();});
 $('#add-medicine').onclick=()=>{if($('#medicine-fields').children.length<50)addMedicine();else toast('1件に保存できるお薬は50種類までです。');}; $('#parse-text').onclick=()=>{if($('#medicine-fields input').value.trim()&&!confirm('現在の入力を文章からの候補で置き換えますか？'))return;applyCandidates(form.elements.originalText.value,true);};
 form.onsubmit=save; $('#search').oninput=()=>{if(loaded)render();}; $('#sort').onchange=()=>{if(loaded)render();}; $('#export').onclick=exportRecords;
