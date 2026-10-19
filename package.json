@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node tests/app.test.js && node tests/import.test.js && node tests/mcp.test.js && node tests/ocr.test.js",
-    "check": "node --check src/worker.js && node --check public/app.js && node --check public/parser.js && node --check public/ocr-utils.js && node --check public/crop.js && node --check public/import.js && node --check public/record-format.js && node --check src/mcp.js && node --check src/records-store.js && node --check public/text-size.js",
+    "check": "node --check src/worker.js && node --check public/app.js && node --check public/parser.js && node --check public/ocr-utils.js && node --check public/crop.js && node --check public/import.js && node --check public/record-format.js && node --check src/mcp.js && node --check src/records-store.js && node --check public/text-size.js && node --check public/navigation.js",
     "build": "node scripts/build.mjs",
     "db:generate": "drizzle-kit generate"
   },
